@@ -1,0 +1,11 @@
+---
+include:
+  - board: nice_nano//zmk
+    shield: ksn_3_left
+    snippet: zmk-usb-logging
+  - board: nice_nano//zmk
+    shield: ksn_3_right
+    snippet: zmk-usb-logging
+  - board: nice_nano//zmk
+    shield: settings_reset
+    artifact-name: settings_reset

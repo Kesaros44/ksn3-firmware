@@ -1,0 +1,23 @@
+#include "ksn_3.dtsi"
+
+&default_transform {
+    col-offset = <11>;
+};
+
+/ {
+    encoder: encoder_right {
+        compatible = "alps,ec11";
+        a-gpios = <&gpio0 2  (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* P0.02 - EN1 */
+        b-gpios = <&gpio0 29 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* P0.29 - EN2 */
+        steps = <80>;
+        status = "okay";
+    };
+    /* 인코더 누름 스위치(SW50)는 별도 GPIO가 아니라 매트릭스 자체
+       (row1/col10)에 포함되어 있음 - 키맵의 일반 키처럼 취급하면 됨. */
+
+    sensors {
+        compatible            = "zmk,keymap-sensors";
+        sensors               = <&encoder>;
+        triggers-per-rotation = <20>;
+    };
+};

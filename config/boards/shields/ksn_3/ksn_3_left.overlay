@@ -1,0 +1,29 @@
+#include "ksn_3.dtsi"
+
+/* caps_lock_led / status_led(COND): 둘 다 물리적으로 peripheral(왼쪽)에 달려있음.
+   ZMK 코어 zmk,indicator-leds 노드는 central 전용 함수를 호출해서 peripheral
+   빌드에서 링크 에러가 나므로 (KSN-1의 ksn1_peripheral_indicators.c와 동일한
+   이유), 커스텀 드라이버 ksn3_peripheral_indicators.c / ksn3_conn_status_relay_
+   peripheral.c 가 이 두 LED를 직접 구동한다. */
+/ {
+    leds {
+        compatible = "gpio-leds";
+        caps_lock_led: caps_lock_led {
+            gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;   /* P0.02 - CapsLock */
+        };
+        status_led: led_1 {
+            /* KSN-1에서 이 LED가 ACTIVE_HIGH로 시작했다가 "연결되면 오히려
+               꺼지는" 반전 증상이 있어 ACTIVE_LOW로 바꿔 고친 전례가 있음.
+               KSN-3 회로가 같은 방식이면 ACTIVE_HIGH로 시작 - 실제 보드에서
+               반전되어 보이면 이 값을 GPIO_ACTIVE_LOW로 바꿀 것. */
+            gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;  /* P0.29 - COND */
+            label = "BLE Status LED";
+        };
+    };
+
+    aliases {
+        caps-lock-led = &caps_lock_led;
+        status-led = &status_led;
+        indicator-led = &status_led;
+    };
+};
