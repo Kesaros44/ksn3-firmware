@@ -5,6 +5,9 @@ ZMK firmware configuration for the KSN-3 split keyboard. This is a **new board**
 * Keyboard Maintainer: [AJG](https://github.com/Kesaros44)
 * Hardware Supported: KSN-3 split keyboard, nice!nano v2 (nRF52840), BLE
 
+![KSN-3 렌더링 - 상면도](images/ksn3_render_top.png)
+![KSN-3 렌더링 - 입체도](images/ksn3_render_iso.png)
+
 ## ⚠️ Read this before flashing
 
 This repo has **not been tested on physical hardware yet**. It splits into two confidence levels:
