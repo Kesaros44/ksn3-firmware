@@ -21,19 +21,22 @@
  * ZMK-internal split state: BT_CONN_ROLE_CENTRAL only ever matches
  * connection #2.
  *
- * Only builds on the central (currently ksn_3_right).
+ * Ported from ksn1-firmware's ksn1_conn_status_relay_central.c - same
+ * poll/discovery constants and connection-tracking logic. None of it
+ * depends on KSN-3's matrix or pinout, only on the central/peripheral
+ * split role, which is architecturally identical. Keep the two files in
+ * sync: fixes land in KSN-1 first.
  *
- * Ported verbatim from ksn1-firmware's ksn1_conn_status_relay_central.c
- * (same poll/discovery-delay constants, same connection-tracking logic -
- * none of this depends on KSN-3's specific matrix/pinout, only on the
- * central/peripheral split role, which is architecturally identical).
+ * Only builds on the central (currently ksn_3_right).
  *
  * NOTE: as of the ZMK version this is built against, zmk_endpoint_is_connected()
  * takes no arguments - it reports the connection state of whichever
- * endpoint is currently selected internally. If this breaks on a future
- * ZMK update, check the current zmk/app/include/zmk/endpoints.h for the
- * exact signature and adjust - the rest of this file doesn't need to
- * change.
+ * endpoint is currently selected internally. (Earlier drafts of this file
+ * called it as zmk_endpoint_is_connected(zmk_endpoints_selected()), which
+ * matched an older/incorrect signature and no longer builds.) If this
+ * breaks again on a future ZMK update, check the current
+ * zmk/app/include/zmk/endpoints.h for the exact signature and adjust -
+ * the rest of this file doesn't need to change.
  */
 
 #include <zephyr/devicetree.h>
@@ -62,16 +65,45 @@ LOG_MODULE_REGISTER(ksn3_conn_status_relay_central, CONFIG_ZMK_LOG_LEVEL);
  * critical path for the keyboard actually working again. Our discovery is
  * just for an LED and isn't urgent, but competing for the same
  * single-outstanding-request-per-connection ATT bearer at exactly the
- * same moment slowed that down on KSN-1, which is why reconnects got
- * noticeably slower after that file was added there. Deferring ours
- * fixes it, same as on KSN-1. */
+ * same moment was slowing that down, which is why reconnects got
+ * noticeably slower after this file was added. Deferring ours fixes it. */
 #define KSN3_DISCOVERY_DELAY_MS 3000
+/* If a discovery attempt finds nothing (e.g. the shared ATT bearer was busy
+ * with ZMK's own split discovery at the same moment - see comment above),
+ * retry after this delay instead of giving up until the bt_conn object
+ * itself changes. Without this, a single failed attempt left status_led
+ * stuck blinking indefinitely even though the split link was fine - this
+ * was the cause of "LED keeps blinking while wired via USB". */
+#define KSN3_DISCOVERY_RETRY_MS 2000
+/* Watchdog: if the split link is up but we still have no characteristic
+ * handle this long after the last attempt, start discovery again from the
+ * poll tick. The two retry paths above only fire when they are actually
+ * reached - a discovery that starts cleanly but whose callback never
+ * arrives (link dropped mid-discovery, work item cancelled, ATT request
+ * lost) leaves discovery_done false with nothing scheduled, and the LED
+ * then blinks forever. This tick-driven check does not care why the
+ * previous attempt stalled. */
+#define KSN3_DISCOVERY_WATCHDOG_MS 5000
+/* Re-send the current state every this many poll ticks even when nothing
+ * changed. bt_gatt_write_without_response() is an ATT Write Command: there
+ * is no response, so a write the peripheral silently discards (e.g. the
+ * characteristic is BT_GATT_PERM_WRITE_ENCRYPT and link encryption hasn't
+ * settled yet) still looks like a success here. Sending only on state
+ * change meant one lost write left status_led blinking forever, since
+ * have_sent is otherwise only cleared when the bt_conn object itself
+ * changes. This showed up most on USB, where zmk_endpoint_is_connected()
+ * goes true within a second of boot - so the first write lands at the
+ * earliest, least settled moment. A periodic re-send makes the relay
+ * self-healing regardless of why a write was lost; apply_state() on the
+ * peripheral ignores a value that matches what it already has. */
+#define KSN3_RESEND_TICKS 8 /* 8 * 250ms = every 2s */
 
 static struct bt_conn *peripheral_conn;
 static uint16_t char_value_handle;
 static bool discovery_done;
 static bool have_sent;
 static bool last_sent_state;
+static uint8_t resend_ticks;
 
 static struct bt_gatt_discover_params discover_params;
 static struct bt_uuid_128 discover_svc_uuid = KSN3_CONN_STATUS_SERVICE_UUID;
@@ -79,14 +111,23 @@ static struct bt_uuid_128 discover_char_uuid = KSN3_CONN_STATUS_CHAR_UUID;
 
 static struct k_work_delayable poll_work;
 static struct k_work_delayable discovery_start_work;
+static int64_t last_discovery_attempt;
 
 static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                              struct bt_gatt_discover_params *params) {
     ARG_UNUSED(conn);
 
     if (!attr) {
-        /* Nothing found this pass; refresh_peripheral_conn() will retry
-         * on the next poll tick if we're still connected. */
+        /* Nothing found this pass. refresh_peripheral_conn() only restarts
+         * discovery when the bt_conn object itself changes, so without an
+         * explicit retry here, a single failed lookup (e.g. ATT bearer busy)
+         * would leave status_led stuck blinking forever even though the
+         * split link never actually dropped. Retry from the top instead. */
+        LOG_WRN("ksn3_conn_status: discovery step found nothing, retrying in %dms",
+                KSN3_DISCOVERY_RETRY_MS);
+        if (peripheral_conn) {
+            k_work_reschedule(&discovery_start_work, K_MSEC(KSN3_DISCOVERY_RETRY_MS));
+        }
         return BT_GATT_ITER_STOP;
     }
 
@@ -112,6 +153,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 static void start_discovery(struct bt_conn *conn) {
     discovery_done = false;
     char_value_handle = 0;
+    last_discovery_attempt = k_uptime_get();
 
     discover_params.uuid = &discover_svc_uuid.uuid;
     discover_params.func = discover_func;
@@ -121,7 +163,18 @@ static void start_discovery(struct bt_conn *conn) {
 
     int err = bt_gatt_discover(conn, &discover_params);
     if (err) {
-        LOG_WRN("ksn3_conn_status: discovery start failed (%d)", err);
+        /* The callback path already retries when a discovery pass finds
+         * nothing, but until this was added, an error returned by
+         * bt_gatt_discover() itself (e.g. -EBUSY while ZMK's own split
+         * discovery still holds the single-outstanding-request ATT bearer)
+         * only logged a warning and scheduled nothing. discovery_done then
+         * stayed false forever, send_state() early-returned on every poll
+         * tick, and status_led blinked indefinitely. Retry from the top. */
+        LOG_WRN("ksn3_conn_status: discovery start failed (%d), retrying in %dms", err,
+                KSN3_DISCOVERY_RETRY_MS);
+        if (peripheral_conn) {
+            k_work_reschedule(&discovery_start_work, K_MSEC(KSN3_DISCOVERY_RETRY_MS));
+        }
     }
 }
 
@@ -163,7 +216,8 @@ static void refresh_peripheral_conn(void) {
      * across poll ticks. Take our own reference before storing it, and
      * drop our old one whenever it's no longer the current link, or we'll
      * end up holding (and later dereferencing / writing to) a stale
-     * connection object once it's freed elsewhere. */
+     * connection object once it's freed elsewhere. This was causing
+     * random disconnects. */
 
     if (found == peripheral_conn) {
         if (found) {
@@ -210,9 +264,20 @@ static void poll_work_handler(struct k_work *work) {
 
     refresh_peripheral_conn();
 
+    /* See KSN3_DISCOVERY_WATCHDOG_MS. Skipped while the initial delayed
+     * start (or a scheduled retry) is still pending, so this only kicks in
+     * when nothing else is going to. */
+    if (peripheral_conn && !discovery_done && !k_work_delayable_is_pending(&discovery_start_work) &&
+        (k_uptime_get() - last_discovery_attempt) > KSN3_DISCOVERY_WATCHDOG_MS) {
+        LOG_WRN("ksn3_conn_status: still no handle after %dms, restarting discovery",
+                KSN3_DISCOVERY_WATCHDOG_MS);
+        start_discovery(peripheral_conn);
+    }
+
     bool connected = zmk_endpoint_is_connected();
 
-    if (!have_sent || connected != last_sent_state) {
+    if (!have_sent || connected != last_sent_state || ++resend_ticks >= KSN3_RESEND_TICKS) {
+        resend_ticks = 0;
         send_state(connected);
     }
 
