@@ -2,10 +2,22 @@
 include:
   - board: nice_nano//zmk
     shield: ksn_3_left
-    snippet: zmk-usb-logging
   - board: nice_nano//zmk
     shield: ksn_3_right
-    snippet: zmk-usb-logging
   - board: nice_nano//zmk
     shield: settings_reset
     artifact-name: settings_reset
+  # 디버그 전용 빌드 (USB CDC-ACM 로깅 포함) - 평소 사용 금지.
+  # 로깅용 USB 시리얼 인터페이스가 항상 켜져 있으면 (1) 일부 회사 보안
+  # 프로그램이 컴포지트 USB 장치를 통째로 막을 수 있고, (2) 유선 연결 중
+  # 계속 발생하는 USB 트래픽이 central-peripheral 분할 링크용 블루투스
+  # 라디오 타이밍을 방해할 수 있어 정식 빌드에서는 제거함 (ksn1-firmware와
+  # 동일한 문제로 진단됨). 필요할 때만 이 디버그 빌드를 따로 플래시해서 사용할 것.
+  - board: nice_nano//zmk
+    shield: ksn_3_left
+    snippet: zmk-usb-logging
+    artifact-name: ksn_3_left_debug
+  - board: nice_nano//zmk
+    shield: ksn_3_right
+    snippet: zmk-usb-logging
+    artifact-name: ksn_3_right_debug
