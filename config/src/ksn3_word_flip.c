@@ -149,7 +149,6 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
-    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
     /* 순서 주의: 한/영 전환을 반드시 먼저 보낸다. 한글 입력 중이면 마지막
@@ -158,7 +157,22 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 지운다(앞쪽 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이
      * 확정되고 IME가 빠지므로 뒤따르는 단어 삭제가 단어 전체에 적용된다. */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
-    queue_kp(&event, delete_word);
+
+    /* 2026-09-15: 맥에서 Option+Backspace(단어삭제)가 한글 조합 텍스트에는
+     * "단어 전체 삭제"로 동작하지 않고 마지막 음절 일부만 지우는 것으로
+     * 실기 확인됨(예: "웃참실패" -> option+backspace 1회 -> "웃참실ᄑ" 남음,
+     * 그 뒤 재입력이 붙어 "웃참실ᄑ웃참실패"가 되는 증상). 맥의 단어 경계
+     * 판정이 한글 조합 문자열에 대해 신뢰할 수 없다는 뜻이므로, 맥에서는
+     * Option 없이 순수 Backspace를 원래 입력한 키 개수(snapshot_len)만큼
+     * 반복 전송해 확실히 지운다. Windows는 Ctrl+Backspace가 정상 동작 확인돼
+     * 그대로 유지. */
+    if (is_mac) {
+        for (size_t i = 0; i < snapshot_len; i++) {
+            queue_kp(&event, BSPC);
+        }
+    } else {
+        queue_kp(&event, LC(BSPC));
+    }
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
