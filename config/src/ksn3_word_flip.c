@@ -31,6 +31,18 @@
  * GitHub Actions 빌드 결과를 반드시 먼저 확인할 것.
  */
 
+/*
+ * 수정 이력(2026-09-15): "웃참실패" 같은 실기 오작동 제보를 근거로 맥 삭제
+ * 방식을 Option+Backspace -> 반복 Backspace로, 대기시간을 350->700ms로
+ * 바꿨었으나, 이후 KSN-2에서 동일 계열 증상이 발생했을 때 로직을 건드리지
+ * 않고 "KSN-1과 100% 동일한 버전"으로 되돌리는 것만으로 해결된 사례가
+ * 확인됨 (ksn2_word_flip.c 커밋 이력 참고). 즉 Option+Backspace 자체가
+ * 한글 조합 텍스트에 근본적으로 안 되는 것이 아니라, 당시 테스트 바이너리가
+ * 최신 소스를 반영 못 했거나(스테일 빌드/플래시) 다른 요인이었을 가능성이
+ * 높다고 판단, KSN-1과 다시 100% 동일하게(Option+Backspace, 350ms) 되돌림.
+ * 코드보다 먼저 "클린 빌드 + 재플래시"부터 확인할 것.
+ */
+
 #define DT_DRV_COMPAT ksn_behavior_word_flip
 
 #include <string.h>
@@ -59,7 +71,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * 잘 알려져 있다. Windows의 LANG1처럼 30ms 뒤에 바로 다음 키를 보내면 아직
  * 이전 입력 모드인 상태에서 삭제/재입력이 들어가 버린다. 그래서 맥에서는
  * 전환 키 뒤에만 넉넉히 기다린다. */
-#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 700  /* 2026-09-14: 350ms에서 전환 완료 전에 삭제가 나가서 씹히는 것으로 보여 상향 */
+#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 350
 
 struct word_flip_key {
     uint32_t keycode;
@@ -149,6 +161,7 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
+    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
     /* 순서 주의: 한/영 전환을 반드시 먼저 보낸다. 한글 입력 중이면 마지막
@@ -157,22 +170,7 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 지운다(앞쪽 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이
      * 확정되고 IME가 빠지므로 뒤따르는 단어 삭제가 단어 전체에 적용된다. */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
-
-    /* 2026-09-15: 맥에서 Option+Backspace(단어삭제)가 한글 조합 텍스트에는
-     * "단어 전체 삭제"로 동작하지 않고 마지막 음절 일부만 지우는 것으로
-     * 실기 확인됨(예: "웃참실패" -> option+backspace 1회 -> "웃참실ᄑ" 남음,
-     * 그 뒤 재입력이 붙어 "웃참실ᄑ웃참실패"가 되는 증상). 맥의 단어 경계
-     * 판정이 한글 조합 문자열에 대해 신뢰할 수 없다는 뜻이므로, 맥에서는
-     * Option 없이 순수 Backspace를 원래 입력한 키 개수(snapshot_len)만큼
-     * 반복 전송해 확실히 지운다. Windows는 Ctrl+Backspace가 정상 동작 확인돼
-     * 그대로 유지. */
-    if (is_mac) {
-        for (size_t i = 0; i < snapshot_len; i++) {
-            queue_kp(&event, BSPC);
-        }
-    } else {
-        queue_kp(&event, LC(BSPC));
-    }
+    queue_kp(&event, delete_word);
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
