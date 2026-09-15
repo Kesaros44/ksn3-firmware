@@ -81,6 +81,14 @@ struct word_flip_key {
 static struct word_flip_key buffer[WORD_FLIP_MAX_LEN];
 static size_t buffer_len;
 
+/* macOS 전용: 지금 입력 소스가 한글인지 추적한다. 캡스락 전환은 상태를
+ * OS에 물어볼 방법이 없는 순수 토글이라, 이 behavior가 보낸 전환 횟수로
+ * 직접 추적하는 수밖에 없다. word_flip 트리거로만 전환한다는 전제이며,
+ * 메뉴바나 다른 방법으로 직접 전환하면 이 추적이 어긋날 수 있다.
+ * 기본값은 영어(false)로 가정 - 부팅 직후 실제 입력 소스가 한글이라면
+ * 처음 한 번은 어긋날 수 있음. */
+static bool mac_is_korean = false;
+
 /* 주의: 이벤트의 ev->keycode는 usage page가 빠진 순수 usage ID(A=0x04 ...
  * Z=0x1D)다. 반면 keys.h의 A/Z 매크로는 ZMK_HID_USAGE(page, id)로 page가
  * 상위 비트에 붙은 값(A=0x70004)이라 그대로 비교하면 절대 참이 되지 않는다.
@@ -290,15 +298,17 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
 
     if (is_mac) {
-        /* macOS는 Option+Backspace(단어 삭제)로는 한글 조합 텍스트를
-         * 정확히 지울 수 없음(단어 경계가 음절 단위로 애매하게 처리됨,
-         * 대기시간을 늘려도 해결 안 됨 - 실기로 반복 확인). 대신 실제로
-         * 몇 개의 한글 음절이 표시됐을지 계산해서, 그 개수만큼 일반
-         * Backspace를 보낸다. */
-        size_t syllables = count_hangul_syllables(snapshot, snapshot_len);
-        for (size_t i = 0; i < syllables; i++) {
+        /* 이 전환 직전에 화면에 있던 텍스트가 한글이었는지 영어였는지에
+         * 따라 지워야 할 개수가 다르다 - 한글이면 음절 개수(글자 수 <
+         * 키 입력 수), 영어면 그냥 키 입력 수만큼(1글자 = 1키)이다.
+         * 무조건 한글로 가정하면(이전 버전의 버그) 영→한 방향에서 너무
+         * 적게 지워 앞부분이 그대로 남는 문제가 생긴다. */
+        size_t delete_count = mac_is_korean ? count_hangul_syllables(snapshot, snapshot_len)
+                                             : snapshot_len;
+        for (size_t i = 0; i < delete_count; i++) {
             queue_kp(&event, BSPC);
         }
+        mac_is_korean = !mac_is_korean; /* 방금 전환을 보냈으니 상태 뒤집기 */
     } else {
         queue_kp(&event, delete_word);
     }
