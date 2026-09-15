@@ -161,26 +161,29 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
-    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
+    uint32_t delete_word = LC(BSPC); /* Windows 전용: Ctrl+Backspace 단어 삭제 */
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
-    /* 순서 주의: 한/영 전환을 반드시 먼저 보낸다. 한글 입력 중이면 마지막
-     * 음절이 IME의 조합(composition) 상태로 물려 있어서, 이때 오는
-     * Ctrl/Option+Backspace는 앱까지 가지 않고 IME가 가로채 조합 중인 음절만
-     * 지운다(앞쪽 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이
-     * 확정되고 IME가 빠지므로 뒤따르는 단어 삭제가 단어 전체에 적용된다. */
-    queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
-
     if (is_mac) {
-        /* macOS는 한글 조합 텍스트에서 Option+Backspace의 "단어" 경계를
-         * 음절 단위로 쪼개서 처리하는 경우가 있어, 한 번으로는 일부 음절이
-         * 지워지지 않고 남을 수 있다(예: "hello"를 한글로 입력한 뒤 뒤집으면
-         * 앞쪽 음절 일부가 남고 그 뒤에 영어가 그대로 붙는 증상). 같은
-         * 삭제 키를 여러 번 반복해 남은 음절까지 마저 지운다. */
-        for (int i = 0; i < 2; i++) {
-            queue_kp(&event, delete_word);
+        /* macOS 방향은 "단어 삭제"(Option+Backspace)를 아예 쓰지 않는다.
+         * 한글 조합 텍스트에서 macOS가 그 "단어" 경계를 음절 단위로 들쭉날쭉
+         * 쪼개 처리해서(때로는 일부만 지워지고, 반복 횟수를 늘리면 반대로
+         * 앞 단어까지 지워지는) 신뢰할 수 없는 것으로 실기 확인됨.
+         *
+         * 대신 아직 한글 입력(조합) 상태를 유지한 채로 - 언어 전환 전에 -
+         * 플레인 Backspace(모디파이어 없음)를 입력했던 키 개수(snapshot_len)
+         * 만큼 정확히 반복해서 보낸다. 조합 중에 오는 일반 Backspace는
+         * "단어"가 아니라 자모/글자 단위로 정확히 한 단계씩 되돌리므로,
+         * 누른 키 개수만큼만 되감으면 타이핑 이전 상태로 정확히 복원된다.
+         * 언어 전환은 다 지운 뒤에 보낸다(전환을 먼저 하면 조합이 확정되어
+         * 오히려 이 되감기 방식이 깨진다). */
+        for (size_t i = 0; i < snapshot_len; i++) {
+            queue_kp(&event, BSPC);
         }
+        queue_kp_ex(&event, lang_toggle, WORD_FLIP_MAC_TOGGLE_WAIT_MS);
     } else {
+        /* Windows는 기존 방식 그대로: 전환 먼저 -> 단어 삭제 */
+        queue_kp_ex(&event, lang_toggle, WORD_FLIP_WAIT_MS);
         queue_kp(&event, delete_word);
     }
 
