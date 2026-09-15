@@ -177,7 +177,7 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
          * 지워지지 않고 남을 수 있다(예: "hello"를 한글로 입력한 뒤 뒤집으면
          * 앞쪽 음절 일부가 남고 그 뒤에 영어가 그대로 붙는 증상). 같은
          * 삭제 키를 여러 번 반복해 남은 음절까지 마저 지운다. */
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             queue_kp(&event, delete_word);
         }
     } else {
