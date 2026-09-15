@@ -170,7 +170,19 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 지운다(앞쪽 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이
      * 확정되고 IME가 빠지므로 뒤따르는 단어 삭제가 단어 전체에 적용된다. */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
-    queue_kp(&event, delete_word);
+
+    if (is_mac) {
+        /* macOS는 한글 조합 텍스트에서 Option+Backspace의 "단어" 경계를
+         * 음절 단위로 쪼개서 처리하는 경우가 있어, 한 번으로는 일부 음절이
+         * 지워지지 않고 남을 수 있다(예: "hello"를 한글로 입력한 뒤 뒤집으면
+         * 앞쪽 음절 일부가 남고 그 뒤에 영어가 그대로 붙는 증상). 같은
+         * 삭제 키를 여러 번 반복해 남은 음절까지 마저 지운다. */
+        for (int i = 0; i < 3; i++) {
+            queue_kp(&event, delete_word);
+        }
+    } else {
+        queue_kp(&event, delete_word);
+    }
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
