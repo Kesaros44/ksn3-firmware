@@ -71,7 +71,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * 잘 알려져 있다. Windows의 LANG1처럼 30ms 뒤에 바로 다음 키를 보내면 아직
  * 이전 입력 모드인 상태에서 삭제/재입력이 들어가 버린다. 그래서 맥에서는
  * 전환 키 뒤에만 넉넉히 기다린다. */
-#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 350
+#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 600
 
 struct word_flip_key {
     uint32_t keycode;
@@ -169,18 +169,7 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 같은 언어로 그대로 재입력되는 증상). */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
 
-    if (is_mac) {
-        /* 전환 직후에도 마지막 한글 조합 세션이 완전히 "닫히지" 않고 남아
-         *있는 경우가 있고, 이 상태에서 오는 Option+Backspace(단어 삭제)가
-         * 단어 경계를 음절 단위로 들쭉날쭉 처리하는 원인으로 보인다(반복
-         * 횟수를 늘려도 일관되지 않았음). 커서를 한 번 움직이는 키(오른쪽
-         * 화살표)를 끼워넣어 조합을 강제로 커밋시킨 뒤 삭제한다 - 커서가
-         * 이미 줄 끝이면 화살표 자체는 아무 부작용이 없다. */
-        queue_kp(&event, RIGHT);
-        queue_kp(&event, delete_word);
-    } else {
-        queue_kp(&event, delete_word);
-    }
+    queue_kp(&event, delete_word);
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
