@@ -70,7 +70,7 @@
                 &kp KP_N7      &kp KP_N8      &kp KP_N9      &kp KP_PLUS    &kp TAB        &kp Q          &kp W          &kp E          &kp R          &kp T          &none          &kp Y          &kp U          &kp I          &kp O          &kp P          &kp LBKT       &kp RBKT       &kp BSLH       &kp HOME       &kp END        &none          
                 &kp KP_N4      &kp KP_N5      &kp KP_N6      &none          &kp CLCK       &kp A          &kp S          &kp D          &kp F          &kp G          &none          &kp H          &kp J          &kp K          &kp L          &kp SEMI       &kp SQT        &none          &kp RET        &kp PG_UP      &kp PG_DN      &none          
                 &kp KP_N1      &kp KP_N2      &kp KP_N3      &kp KP_ENTER   &kp LSHFT      &kp Z          &none          &kp X          &kp C          &kp V          &kp B          &kp B          &kp N          &kp M          &kp COMMA      &kp DOT        &kp FSLH       &none          &kp RSHFT      &kp UP         &none          &none
-                &kp KP_N0      &none          &kp KP_DOT     &none          &mo 1          &kp LCTRL      &none          &kp LGUI       &kp LALT       &none          &kp SPACE      &kp SPACE      &none          &kp RALT       &word_flip 0   &mo 1          &kp K_APP      &kp LANG_HANJA &kp LEFT       &kp DOWN       &kp RIGHT      &none >;
+                &kp KP_N0      &none          &kp KP_DOT     &none          &kp LCTRL      &kp LGUI       &none          &kp LALT       &mo 1          &none          &kp SPACE      &kp SPACE      &none          &kp RALT       &word_flip 0   &mo 1          &kp K_APP      &kp LANG_HANJA &kp LEFT       &kp DOWN       &kp RIGHT      &none >;
         };
 
         func_layer {
@@ -92,7 +92,7 @@
                 &kp KP_N7      &kp KP_N8      &kp KP_N9      &kp KP_PLUS    &kp TAB        &kp Q          &kp W          &kp E          &kp R          &kp T          &none          &kp Y          &kp U          &kp I          &kp O          &kp P          &kp LBKT       &kp RBKT       &kp BSLH       &kp HOME       &kp END        &none          
                 &kp KP_N4      &kp KP_N5      &kp KP_N6      &none          &kp CLCK       &kp A          &kp S          &kp D          &kp F          &kp G          &none          &kp H          &kp J          &kp K          &kp L          &kp SEMI       &kp SQT        &none          &kp RET        &kp PG_UP      &kp PG_DN      &none          
                 &kp KP_N1      &kp KP_N2      &kp KP_N3      &kp KP_ENTER   &kp LSHFT      &kp Z          &none          &kp X          &kp C          &kp V          &kp B          &kp B          &kp N          &kp M          &kp COMMA      &kp DOT        &kp FSLH       &none          &kp RSHFT      &kp UP         &none          &none
-                &kp KP_N0      &none          &kp KP_DOT     &none          &mo 1          &kp LCTRL      &none          &kp LALT       &kp LGUI       &none          &kp SPACE      &kp SPACE      &none          &kp RALT       &word_flip 1   &mo 1          &kp K_APP      &kp LANG_HANJA &kp LEFT       &kp DOWN       &kp RIGHT      &none >;
+                &kp KP_N0      &none          &kp KP_DOT     &none          &kp LCTRL      &kp LGUI       &none          &kp LALT       &mo 1          &none          &kp SPACE      &kp SPACE      &none          &kp RALT       &word_flip 1   &mo 1          &kp K_APP      &kp LANG_HANJA &kp LEFT       &kp DOWN       &kp RIGHT      &none >;
         };
     };
 };
