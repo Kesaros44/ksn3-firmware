@@ -91,6 +91,126 @@ static bool is_letter(uint16_t usage_page, uint32_t keycode) {
            keycode <= ZMK_HID_USAGE_ID(Z);
 }
 
+/* ---- 2벌식 한글 자모 조합 시뮬레이션 (macOS 방향 삭제용) ----
+ *
+ * macOS의 Option+Backspace(단어 삭제)는 한글 조합 텍스트의 "단어" 경계를
+ * 음절 단위로 애매하게 잘라 처리해서, 대기시간을 아무리 늘려도 일부만
+ * 지워지는 문제를 근본적으로 해결하지 못한다(실기로 반복 확인됨).
+ *
+ * 대신 2벌식 자모 조합 규칙을 그대로 흉내내서, 입력했던 로마자 키
+ * 시퀀스가 실제로 몇 개의 한글 음절(화면에 보이는 글자 수)로 표시됐을지
+ * 정확히 계산한 뒤, 그 개수만큼만 일반 Backspace(모디파이어 없음)를
+ * 보낸다. 이미 전환(언어 스위치)이 끝나 조합이 커밋된 뒤라면, 일반
+ * Backspace는 "단어"가 아니라 화면에 보이는 글자 하나를 정확히 하나씩
+ * 지우는 결정적 동작이므로, 글자 수만 정확히 알면 정확히 지울 수 있다.
+ */
+static bool is_vowel_key(uint32_t keycode) {
+    switch (keycode) {
+    case ZMK_HID_USAGE_ID(Y): /* ㅛ */
+    case ZMK_HID_USAGE_ID(U): /* ㅕ */
+    case ZMK_HID_USAGE_ID(I): /* ㅑ */
+    case ZMK_HID_USAGE_ID(O): /* ㅐ */
+    case ZMK_HID_USAGE_ID(P): /* ㅔ */
+    case ZMK_HID_USAGE_ID(H): /* ㅗ */
+    case ZMK_HID_USAGE_ID(J): /* ㅓ */
+    case ZMK_HID_USAGE_ID(K): /* ㅏ */
+    case ZMK_HID_USAGE_ID(L): /* ㅣ */
+    case ZMK_HID_USAGE_ID(B): /* ㅠ */
+    case ZMK_HID_USAGE_ID(N): /* ㅜ */
+    case ZMK_HID_USAGE_ID(M): /* ㅡ */
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* prev(현재 중성)와 next(새로 들어온 모음 키)가 하나의 이중모음으로
+ * 결합되는 조합인지 - 2벌식에서 유효한 조합은 ㅗ/ㅜ/ㅡ 세 가지뿐이다. */
+static bool vowels_compound(uint32_t prev, uint32_t next) {
+    if (prev == ZMK_HID_USAGE_ID(H)) { /* ㅗ + ㅏ/ㅐ/ㅣ = ㅘ/ㅙ/ㅚ */
+        return next == ZMK_HID_USAGE_ID(K) || next == ZMK_HID_USAGE_ID(O) ||
+               next == ZMK_HID_USAGE_ID(L);
+    }
+    if (prev == ZMK_HID_USAGE_ID(N)) { /* ㅜ + ㅓ/ㅔ/ㅣ = ㅝ/ㅞ/ㅟ */
+        return next == ZMK_HID_USAGE_ID(J) || next == ZMK_HID_USAGE_ID(P) ||
+               next == ZMK_HID_USAGE_ID(L);
+    }
+    if (prev == ZMK_HID_USAGE_ID(M)) { /* ㅡ + ㅣ = ㅢ */
+        return next == ZMK_HID_USAGE_ID(L);
+    }
+    return false;
+}
+
+/* keys[0..len)의 로마자 키 시퀀스가 2벌식으로 조합됐을 때 화면에 보이는
+ * 한글 음절(글자) 개수를 계산한다. state: 0=새 음절 시작 전, 1=초성만,
+ * 2=초성+중성, 3=초성+중성+종성. */
+static size_t count_hangul_syllables(const struct word_flip_key *keys, size_t len) {
+    size_t syllables = 0;
+    int state = 0;
+    uint32_t last_jung = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        uint32_t kc = keys[i].keycode;
+        bool vowel = is_vowel_key(kc);
+        bool next_is_vowel = (i + 1 < len) && is_vowel_key(keys[i + 1].keycode);
+
+        switch (state) {
+        case 0:
+            syllables++;
+            if (vowel) {
+                state = 2;
+                last_jung = kc;
+            } else {
+                state = 1;
+            }
+            break;
+        case 1: /* 초성만 있음 */
+            if (vowel) {
+                state = 2;
+                last_jung = kc;
+            } else {
+                /* 초성 단독으로 음절 확정, 새 음절 시작 */
+                syllables++;
+                state = 1;
+            }
+            break;
+        case 2: /* 초성+중성 */
+            if (vowel) {
+                if (vowels_compound(last_jung, kc)) {
+                    /* 이중모음으로 결합, 같은 음절 유지 */
+                } else {
+                    /* 결합 불가 - 새 음절(모음 단독 시작) */
+                    syllables++;
+                    last_jung = kc;
+                }
+            } else if (next_is_vowel) {
+                /* 뒤에 모음이 오면 이 자음은 종성이 아니라 다음 음절의
+                 * 초성으로 재분석됨(연음) - 새 음절 시작 */
+                syllables++;
+                state = 1;
+            } else {
+                state = 3; /* 종성으로 결합, 같은 음절 */
+            }
+            break;
+        case 3: /* 초성+중성+종성 */
+            if (vowel) {
+                /* 종성이 다음 음절의 초성으로 넘어가고, 이 모음이 그
+                 * 음절의 중성이 됨 - 새 음절 시작 */
+                syllables++;
+                state = 2;
+                last_jung = kc;
+            } else {
+                /* 겹받침은 2벌식에서 별도 키가 없으므로 새 음절 시작 */
+                syllables++;
+                state = 1;
+            }
+            break;
+        }
+    }
+
+    return syllables;
+}
+
 static int word_flip_keycode_listener(const zmk_event_t *eh) {
     const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
     if (ev == NULL || !ev->state) {
@@ -161,7 +281,7 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
-    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
+    uint32_t delete_word = LC(BSPC); /* Windows 전용: Ctrl+Backspace 단어 삭제 */
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
     /* 순서: 전환을 먼저 보낸다 - 조합 중에 백스페이스를 먼저 보내면(이전
@@ -169,7 +289,19 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 같은 언어로 그대로 재입력되는 증상). */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
 
-    queue_kp(&event, delete_word);
+    if (is_mac) {
+        /* macOS는 Option+Backspace(단어 삭제)로는 한글 조합 텍스트를
+         * 정확히 지울 수 없음(단어 경계가 음절 단위로 애매하게 처리됨,
+         * 대기시간을 늘려도 해결 안 됨 - 실기로 반복 확인). 대신 실제로
+         * 몇 개의 한글 음절이 표시됐을지 계산해서, 그 개수만큼 일반
+         * Backspace를 보낸다. */
+        size_t syllables = count_hangul_syllables(snapshot, snapshot_len);
+        for (size_t i = 0; i < syllables; i++) {
+            queue_kp(&event, BSPC);
+        }
+    } else {
+        queue_kp(&event, delete_word);
+    }
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
