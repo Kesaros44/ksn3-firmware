@@ -59,7 +59,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * 잘 알려져 있다. Windows의 LANG1처럼 30ms 뒤에 바로 다음 키를 보내면 아직
  * 이전 입력 모드인 상태에서 삭제/재입력이 들어가 버린다. 그래서 맥에서는
  * 전환 키 뒤에만 넉넉히 기다린다. */
-#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 350
+#define WORD_FLIP_MAC_TOGGLE_WAIT_MS 700  /* 2026-09-14: 350ms에서 전환 완료 전에 삭제가 나가서 씹히는 것으로 보여 상향 */
 
 struct word_flip_key {
     uint32_t keycode;

@@ -12,11 +12,9 @@
             gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;   /* P0.02 - CapsLock */
         };
         status_led: led_1 {
-            /* KSN-1에서 이 LED가 ACTIVE_HIGH로 시작했다가 "연결되면 오히려
-               꺼지는" 반전 증상이 있어 ACTIVE_LOW로 바꿔 고친 전례가 있음.
-               KSN-3 회로가 같은 방식이면 ACTIVE_HIGH로 시작 - 실제 보드에서
-               반전되어 보이면 이 값을 GPIO_ACTIVE_LOW로 바꿀 것. */
-            gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;  /* P0.29 - COND */
+            /* 2026-09-14: 실제 보드에서 연결됐을 때 LED가 안 들어오는(반전)
+               증상 확인됨 - KSN-1과 동일한 패턴이라 ACTIVE_LOW로 수정. */
+            gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;  /* P0.29 - COND */
             label = "BLE Status LED";
         };
     };
