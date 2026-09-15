@@ -161,29 +161,24 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
-    uint32_t delete_word = LC(BSPC); /* Windows 전용: Ctrl+Backspace 단어 삭제 */
+    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
+    /* 순서: 전환을 먼저 보낸다 - 조합 중에 백스페이스를 먼저 보내면(이전
+     * 시도) 캡스락 전환 단축키 자체가 씹히는 것이 실기로 확인됨(삭제 후
+     * 같은 언어로 그대로 재입력되는 증상). */
+    queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
+
     if (is_mac) {
-        /* macOS 방향은 "단어 삭제"(Option+Backspace)를 아예 쓰지 않는다.
-         * 한글 조합 텍스트에서 macOS가 그 "단어" 경계를 음절 단위로 들쭉날쭉
-         * 쪼개 처리해서(때로는 일부만 지워지고, 반복 횟수를 늘리면 반대로
-         * 앞 단어까지 지워지는) 신뢰할 수 없는 것으로 실기 확인됨.
-         *
-         * 대신 아직 한글 입력(조합) 상태를 유지한 채로 - 언어 전환 전에 -
-         * 플레인 Backspace(모디파이어 없음)를 입력했던 키 개수(snapshot_len)
-         * 만큼 정확히 반복해서 보낸다. 조합 중에 오는 일반 Backspace는
-         * "단어"가 아니라 자모/글자 단위로 정확히 한 단계씩 되돌리므로,
-         * 누른 키 개수만큼만 되감으면 타이핑 이전 상태로 정확히 복원된다.
-         * 언어 전환은 다 지운 뒤에 보낸다(전환을 먼저 하면 조합이 확정되어
-         * 오히려 이 되감기 방식이 깨진다). */
-        for (size_t i = 0; i < snapshot_len; i++) {
-            queue_kp(&event, BSPC);
-        }
-        queue_kp_ex(&event, lang_toggle, WORD_FLIP_MAC_TOGGLE_WAIT_MS);
+        /* 전환 직후에도 마지막 한글 조합 세션이 완전히 "닫히지" 않고 남아
+         *있는 경우가 있고, 이 상태에서 오는 Option+Backspace(단어 삭제)가
+         * 단어 경계를 음절 단위로 들쭉날쭉 처리하는 원인으로 보인다(반복
+         * 횟수를 늘려도 일관되지 않았음). 커서를 한 번 움직이는 키(오른쪽
+         * 화살표)를 끼워넣어 조합을 강제로 커밋시킨 뒤 삭제한다 - 커서가
+         * 이미 줄 끝이면 화살표 자체는 아무 부작용이 없다. */
+        queue_kp(&event, RIGHT);
+        queue_kp(&event, delete_word);
     } else {
-        /* Windows는 기존 방식 그대로: 전환 먼저 -> 단어 삭제 */
-        queue_kp_ex(&event, lang_toggle, WORD_FLIP_WAIT_MS);
         queue_kp(&event, delete_word);
     }
 
