@@ -3,8 +3,18 @@
  * ksn_3_left.overlay) to show whether the CENTRAL half (currently
  * ksn_3_right) is connected to a PC/host.
  *
- * Solid on  = central has an active host connection (USB or BLE).
- * Blinking  = no active host connection.
+ * Solid on   = central has an active host connection (USB or BLE), and at
+ *              least KSN3_PROFILE_MIN_CYCLES blink-cycles have already
+ *              played since the last profile switch / disconnect (see
+ *              below) - never jumps straight to solid without that.
+ * Blinking   = no active host connection: blinks out (active profile
+ *              index + 1) short pulses, pauses, then repeats for as long
+ *              as disconnected. This doubles as "which profile am I on"
+ *              feedback - switching to an already-paired profile that
+ *              reconnects almost instantly still plays at least
+ *              KSN3_PROFILE_MIN_CYCLES full cycles before settling solid,
+ *              so a fast reconnect can't rob the user of the readout.
+ *              (Ported from ksn1-firmware's profile-indicator feature.)
  *
  * WHY THIS NEEDS ITS OWN GATT SERVICE
  * ------------------------------------
@@ -22,8 +32,10 @@
  * private UUIDs, see ksn3_conn_status_relay.h) directly on top of the SAME
  * BLE connection the two halves already use for ZMK's split protocol.
  * ksn3_conn_status_relay_central.c (built only on ksn_3_right) writes a
- * single byte to this characteristic every time zmk_endpoint_is_connected()
- * changes. This file just receives that byte and drives the LED.
+ * 2-byte payload ([0]=host connected, [1]=active BLE profile index) to
+ * this characteristic whenever either value changes (plus a periodic
+ * resend regardless, for self-healing - see KSN3_RESEND_TICKS there).
+ * This file receives those bytes and drives the LED accordingly.
  *
  * Only builds on the peripheral (mirrors the guard used in
  * ksn3_peripheral_indicators.c) and only if the status_led alias exists.
@@ -51,8 +63,30 @@
 
 LOG_MODULE_REGISTER(ksn3_conn_status_relay_peripheral, CONFIG_ZMK_LOG_LEVEL);
 
-/* How fast status_led blinks while there's no host connection. */
-#define KSN3_CONN_STATUS_BLINK_MS 300
+/* Faster blink used while we have never received a single byte from the
+ * central. This is a deliberate diagnostic: it can't be confused with the
+ * profile-count cycle below, so the board itself says "delivery path is
+ * broken" with no serial log needed:
+ *   fast (100ms) = nothing ever arrived from the central -> delivery path
+ *   profile-count cycle (see below) = central is talking to us, this is
+ *                  its actual reported state
+ * Once the first byte arrives this is never used again for the rest of
+ * the session. */
+#define KSN3_CONN_STATUS_SILENT_MS 100
+
+/* Profile-count blink cycle, played whenever there is no active host
+ * connection: (active profile index + 1) pulses of ON_MS/OFF_MS, then a
+ * CYCLE_PAUSE_MS gap, then repeat for as long as disconnected. The "+1"
+ * is so profile 0 still blinks once instead of looking identical to "no
+ * signal at all". MIN_CYCLES is the minimum number of full cycles played
+ * after any profile switch (or a drop from a previously-solid state)
+ * before "connected" is allowed to turn the LED solid - without this, an
+ * already-paired profile that reconnects in well under a second would
+ * flash the count too briefly to read, or not at all. */
+#define KSN3_PROFILE_BLINK_ON_MS 150
+#define KSN3_PROFILE_BLINK_OFF_MS 150
+#define KSN3_PROFILE_CYCLE_PAUSE_MS 700
+#define KSN3_PROFILE_MIN_CYCLES 5
 
 #define LED_GPIO_NODE_ID DT_COMPAT_GET_ANY_STATUS_OKAY(gpio_leds)
 
@@ -60,7 +94,18 @@ static const struct device *led_dev = DEVICE_DT_GET(LED_GPIO_NODE_ID);
 static const uint8_t status_led_idx = DT_NODE_CHILD_IDX(DT_ALIAS(status_led));
 
 static bool host_connected;
+static bool ever_heard_from_central;
+static bool have_applied_once;
 static bool led_phys_on;
+
+/* Profile-count cycle state. */
+static uint8_t current_profile;
+static uint8_t blink_index;   /* which pulse within the current cycle (0-based) */
+static bool blink_on_phase;   /* mid-pulse: currently in the "on" half? */
+static bool in_pause;         /* between cycles, waiting out CYCLE_PAUSE_MS */
+static uint8_t cycles_played; /* full cycles completed since the last reset */
+static bool settled_solid;    /* true once MIN_CYCLES was met and we've gone solid */
+
 static struct k_work_delayable blink_work;
 
 static void set_led(bool on) {
@@ -72,32 +117,88 @@ static void set_led(bool on) {
     }
 }
 
+static void start_cycle(void) {
+    blink_index = 0;
+    blink_on_phase = true;
+    in_pause = false;
+    set_led(true);
+    k_work_reschedule(&blink_work, K_MSEC(KSN3_PROFILE_BLINK_ON_MS));
+}
+
 static void blink_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
 
-    if (host_connected) {
-        /* Solid on - stop rescheduling, nothing left to toggle. */
-        set_led(true);
+    if (!ever_heard_from_central) {
+        /* Delivery-path diagnostic flicker - see KSN3_CONN_STATUS_SILENT_MS. */
+        set_led(!led_phys_on);
+        k_work_reschedule(&blink_work, K_MSEC(KSN3_CONN_STATUS_SILENT_MS));
         return;
     }
 
-    set_led(!led_phys_on);
-    k_work_reschedule(&blink_work, K_MSEC(KSN3_CONN_STATUS_BLINK_MS));
+    if (in_pause) {
+        /* A cycle just finished. Only now do we check whether we're
+         * allowed to settle solid - never mid-pulse, so a connect event
+         * arriving mid-blink can't cut a pulse short and make it
+         * unreadable. */
+        if (host_connected && cycles_played >= KSN3_PROFILE_MIN_CYCLES) {
+            settled_solid = true;
+            set_led(true);
+            return; /* steady on - nothing left to reschedule */
+        }
+        start_cycle();
+        return;
+    }
+
+    if (blink_on_phase) {
+        set_led(false);
+        blink_on_phase = false;
+        k_work_reschedule(&blink_work, K_MSEC(KSN3_PROFILE_BLINK_OFF_MS));
+        return;
+    }
+
+    /* Finished one full pulse (on+off). One cycle = (current_profile + 1)
+     * pulses, so profile 0 still blinks once instead of looking like "no
+     * signal". */
+    if (++blink_index >= (uint8_t)(current_profile + 1)) {
+        cycles_played++;
+        in_pause = true;
+        set_led(false);
+        k_work_reschedule(&blink_work, K_MSEC(KSN3_PROFILE_CYCLE_PAUSE_MS));
+        return;
+    }
+
+    blink_on_phase = true;
+    set_led(true);
+    k_work_reschedule(&blink_work, K_MSEC(KSN3_PROFILE_BLINK_ON_MS));
 }
 
-static void apply_state(bool connected) {
-    if (host_connected == connected) {
-        return;
-    }
+static void apply_state(bool connected, uint8_t profile) {
+    bool profile_changed = (profile != current_profile);
+    /* A drop from an already-solid display is treated the same as a
+     * profile switch: restart the count from zero so the next connect
+     * (to the same or a different profile) always gets a full readout,
+     * not just whatever cycle happened to be mid-flight. */
+    bool fresh_drop = (settled_solid && !connected);
+    bool force_restart = !have_applied_once || profile_changed || fresh_drop;
+
+    have_applied_once = true;
+    current_profile = profile;
     host_connected = connected;
 
-    if (connected) {
+    if (force_restart) {
+        cycles_played = 0;
+        settled_solid = false;
         k_work_cancel_delayable(&blink_work);
-        set_led(true);
-    } else {
-        set_led(true); /* start each blink cycle from "on" */
-        k_work_reschedule(&blink_work, K_MSEC(KSN3_CONN_STATUS_BLINK_MS));
+        start_cycle();
+        return;
     }
+
+    if (settled_solid) {
+        set_led(true);
+    }
+    /* Otherwise a cycle is already running (or about to enter its pause) -
+     * it picks up the latest host_connected/cycles_played on its own at
+     * the next pause boundary, nothing to do here. */
 }
 
 static ssize_t on_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
@@ -107,11 +208,14 @@ static ssize_t on_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, c
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
 
-    if (len < 1) {
+    if (len < 2) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
-    apply_state(((const uint8_t *)buf)[0] != 0);
+    ever_heard_from_central = true;
+
+    const uint8_t *bytes = buf;
+    apply_state(bytes[0] != 0, bytes[1]);
     return len;
 }
 
@@ -138,8 +242,11 @@ static int ksn3_conn_status_relay_peripheral_init(void) {
      * us otherwise - matches reality on cold boot, before the split link
      * and the host link are both up. */
     host_connected = false;
+    /* Fast diagnostic flicker until the first byte ever arrives from
+     * central - blink_work_handler's `!ever_heard_from_central` branch
+     * keeps rescheduling at this same rate until then. */
     set_led(true);
-    k_work_reschedule(&blink_work, K_MSEC(KSN3_CONN_STATUS_BLINK_MS));
+    k_work_reschedule(&blink_work, K_MSEC(KSN3_CONN_STATUS_SILENT_MS));
 
     return 0;
 }
