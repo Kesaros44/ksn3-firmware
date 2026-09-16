@@ -16,8 +16,9 @@
  *      b. 한/영 전환 전송 - Windows(param1=0)는 LANG1, macOS(param1=1)는
  *         Caps Lock. 삭제보다 먼저 보내야 한다(아래 on_word_flip_binding_
  *         pressed의 순서 주석 참고).
- *      c. 단어 삭제 조합 전송 - Windows는 Ctrl+Backspace, macOS는
- *         Option+Backspace.
+ *      c. 단어 삭제 - Windows는 Ctrl+Backspace(단어 삭제), macOS는 일반
+ *         Backspace를 캡처된 키 입력 개수만큼 반복 전송(이유는 아래
+ *         on_word_flip_binding_pressed 안의 주석 참고).
  *      d. 복사해둔 버퍼를 그대로 순서대로 재입력.
  *
  * 전부 zmk_behavior_queue_add()로 큐에 넣는다 - ZMK의 매크로 behavior가
@@ -41,6 +42,20 @@
  * 최신 소스를 반영 못 했거나(스테일 빌드/플래시) 다른 요인이었을 가능성이
  * 높다고 판단, KSN-1과 다시 100% 동일하게(Option+Backspace, 350ms) 되돌림.
  * 코드보다 먼저 "클린 빌드 + 재플래시"부터 확인할 것.
+ */
+
+/*
+ * 수정 이력(2026-09-16): Option+Backspace가 한글 조합 텍스트의 단어 경계를
+ * 들쭉날쭉 판단해 일부만 지우는 문제가 여러 실기 테스트로 반복 확인됨.
+ * 정확한 음절 수를 시뮬레이션해서 지우는 방식도 시도했으나(자모결합 예외
+ * 케이스, 언어 상태 추적 오류로 줄 경계를 넘는 삭제 사고까지 발생) 위험이
+ * 커서 전면 폐기함. 대신 macOS 삭제 방식을 "일반 Backspace를 캡처된 키
+ * 입력 개수만큼 반복 전송"으로 교체 - 화면에 찍힌 음절 수가 키 입력 수를
+ * 절대 넘을 수 없다는 2벌식 조합의 성질을 이용해, 시뮬레이션/상태 추적
+ * 없이도 항상 "충분히" 지워지는 것을 보장한다(자세한 근거는 아래
+ * on_word_flip_binding_pressed 안의 주석 참고). 한/영 오타가 거의 항상
+ * 문장 맨 앞 몇 글자에서만 발생한다는 실사용 패턴을 근거로, 초과 삭제
+ * 가능성을 사용자가 명시적으로 감수하기로 함.
  */
 
 #define DT_DRV_COMPAT ksn_behavior_word_flip
@@ -161,16 +176,44 @@ static int on_word_flip_binding_pressed(struct zmk_behavior_binding *binding,
      * 전환"이 켜져 있어야 한다. 짧게 누르면 입력 소스 전환, 길게 누르면
      * 실제 Caps Lock이므로 여기서 보내는 40ms 탭은 전환으로 동작한다.) */
     bool is_mac = binding->param1 == 1;
-    uint32_t delete_word = is_mac ? LA(BSPC) : LC(BSPC);
     uint32_t lang_toggle = is_mac ? CLCK : LANG1;
 
     /* 순서 주의: 한/영 전환을 반드시 먼저 보낸다. 한글 입력 중이면 마지막
-     * 음절이 IME의 조합(composition) 상태로 물려 있어서, 이때 오는
-     * Ctrl/Option+Backspace는 앱까지 가지 않고 IME가 가로채 조합 중인 음절만
-     * 지운다(앞쪽 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이
-     * 확정되고 IME가 빠지므로 뒤따르는 단어 삭제가 단어 전체에 적용된다. */
+     * 음절이 IME의 조합(composition) 상태로 물려 있어서, 이때 오는 삭제
+     * 명령이 앱까지 가지 않고 IME가 가로채 조합 중인 음절만 지운다(앞쪽
+     * 한글이 남는 증상). 전환 키를 먼저 보내면 그 시점에 조합이 확정되고
+     * IME가 빠지므로 뒤따르는 삭제가 확정된 텍스트에 그대로 적용된다. */
     queue_kp_ex(&event, lang_toggle, is_mac ? WORD_FLIP_MAC_TOGGLE_WAIT_MS : WORD_FLIP_WAIT_MS);
-    queue_kp(&event, delete_word);
+
+    if (is_mac) {
+        /* macOS: Option+Backspace(단어 삭제)는 한글 조합 텍스트의 "단어"
+         * 경계를 들쭉날쭉하게 판단해 일부만 지우는 문제가 실기로 여러 차례
+         * 확인됨. 대신 일반 Backspace를 캡처해둔 키 입력 개수(snapshot_len)
+         * 만큼 반복해서 보낸다.
+         *
+         * 안전성 근거: 2벌식 조합에서는 키 여러 개(최대 3개: 초성+중성+
+         * 종성)가 합쳐져 음절 1개가 되므로, 화면에 실제로 찍힌 음절/글자
+         * 수는 항상 snapshot_len 이하다(더 많아질 수 없음). 따라서 일반
+         * Backspace를 snapshot_len번 보내면:
+         *   - 원래 영어로 찍혀 있던 경우: 키 개수 = 글자 개수라 정확히
+         *     맞아떨어져 완벽하게 지워짐
+         *   - 원래 한글로 조합돼 있던 경우: 실제 음절 수보다 많이 지우게
+         *     되므로 반드시 다 지워지고, 남는 만큼만 그 앞의 텍스트까지
+         *     추가로 지워짐
+         * 즉 어느 방향이든 "덜 지워서 글자가 남는" 경우는 없고, 초과
+         * 삭제분도 이번 단어의 키 입력 개수(WORD_FLIP_MAX_LEN=24 이하)를
+         * 절대 넘지 않아 예전처럼 줄 경계를 몇 줄씩 건너뛰는 사고와는
+         * 성격이 다르다. 이 트레이드오프는 실사용 패턴(한/영 오타는 거의
+         * 항상 문장 맨 앞 몇 글자에서만 발생)을 감안해 사용자가 명시적으로
+         * 확인/승인함(2026-09-16). */
+        for (size_t i = 0; i < snapshot_len; i++) {
+            queue_kp(&event, BSPC);
+        }
+    } else {
+        /* Windows: Ctrl+Backspace(단어 삭제) - 이 문제 자체가 mac 전용으로
+         * 보고된 것이라 기존 방식 그대로 유지. */
+        queue_kp(&event, LC(BSPC));
+    }
 
     for (size_t i = 0; i < snapshot_len; i++) {
         uint32_t param1 = ((uint32_t)snapshot[i].explicit_modifiers << 24) | snapshot[i].keycode;
