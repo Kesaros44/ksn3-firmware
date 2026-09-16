@@ -54,6 +54,19 @@ Double-tap reset on the nice!nano to enter the UF2 bootloader, then drag the mat
 
 Flash the `settings_reset` artifact to a half to wipe its BLE bonds, then reflash normal firmware and re-pair.
 
+## Recent Changes
+
+- Reconstructed the keymap against the traced schematic (row/column fixes, Fn key placement, mac-layer modifier order) after the initial draft didn't match the physical board.
+- Ported `word_flip` and the status LED relay from [KSN-1](https://github.com/Kesaros44/ksn1-firmware).
+- Iterated several times on the macOS `word_flip` delete step; as of 2026-09-16 it resends plain Backspace `snapshot_len` times instead of Option+Backspace, after finding Option+Backspace doesn't respect word boundaries inside Hangul IME composition (see Known Issues below — [KSN-1](https://github.com/Kesaros44/ksn1-firmware)/[KSN-2](https://github.com/Kesaros44/ksn2-firmware) still use Option+Backspace there).
+- Switched the `mac_layer` language-toggle key to Caps Lock (`CLCK`), matching KSN-1/KSN-2.
+- Raised BLE TX power by +8dBm for more reliable connections.
+
+## Known Issues / TODO
+
+- **macOS word_flip delete diverges from KSN-1/KSN-2:** see above — the Option+Backspace approach still used on the other two boards may have the same Hangul word-boundary bug found here. Worth porting this fix back to them, or confirming they don't need it.
+- **No USB VID/PID or corporate-security HID hardening:** unlike [KSN-1](https://github.com/Kesaros44/ksn1-firmware)/[KSN-2](https://github.com/Kesaros44/ksn2-firmware), this board doesn't yet set `CONFIG_USB_DEVICE_VID`/`PID` or the HKRO/boot-protocol settings — add these if wired use behind corporate security software is expected.
+
 ## Schematic source
 
 `config/` was derived from `SCH_KSN3L_20260831.json` / `SCH_KSN3R_20260831.json` (EasyEDA exports). If the physical board is revised, check the GPIO pin comments in `ksn_3.dtsi` and the two overlays against the new schematic's net labels.
@@ -116,3 +129,16 @@ nice!nano의 리셋 버튼을 더블탭해서 UF2 부트로더로 진입한 뒤,
 ## 회로도 출처
 
 `config/`는 `SCH_KSN3L_20260831.json` / `SCH_KSN3R_20260831.json`(EasyEDA 내보내기)에서 도출했습니다. 실물 보드가 리비전되면, `ksn_3.dtsi`와 두 overlay 파일의 GPIO 핀 주석을 새 회로도의 net label과 대조해보세요.
+
+## 최근 변경 사항
+
+- 실물 보드와 맞지 않던 초안 키맵을 트레이싱한 회로도 기준으로 전면 재구성(행/열 수정, Fn 키 위치, mac_layer 모디파이어 순서 등).
+- [KSN-1](https://github.com/Kesaros44/ksn1-firmware)에서 `word_flip`과 상태 LED 릴레이 이식.
+- macOS `word_flip` 삭제 방식을 여러 차례 수정한 끝에, 2026-09-16 기준 Option+Backspace 대신 일반 Backspace를 `snapshot_len`번 반복 전송하는 방식으로 변경 — Option+Backspace가 한글 IME 조합 중 단어 경계를 지키지 않는 문제가 발견됐기 때문입니다(아래 알려진 이슈 참고 — [KSN-1](https://github.com/Kesaros44/ksn1-firmware)/[KSN-2](https://github.com/Kesaros44/ksn2-firmware)는 아직 그 자리에 Option+Backspace를 씁니다).
+- `mac_layer`의 언어 전환 키를 KSN-1/KSN-2와 동일하게 Caps Lock(`CLCK`)으로 변경.
+- BLE 연결 안정성을 위해 TX 파워 +8dBm 상향.
+
+## 알려진 이슈 / TODO
+
+- **macOS word_flip 삭제 방식이 KSN-1/KSN-2와 다름:** 위 항목 참고 — 다른 두 보드가 여전히 쓰는 Option+Backspace 방식에 여기서 발견된 것과 같은 한글 단어 경계 버그가 있을 수 있습니다. 그쪽에도 이식하거나, 필요 없는지 확인이 필요합니다.
+- **USB VID/PID 및 사내 보안 프로그램 호환 설정 없음:** [KSN-1](https://github.com/Kesaros44/ksn1-firmware)/[KSN-2](https://github.com/Kesaros44/ksn2-firmware)와 달리 `CONFIG_USB_DEVICE_VID`/`PID`나 HKRO·부트 프로토콜 설정이 아직 없습니다. 사내 보안 프로그램이 있는 환경에서 유선 사용을 염두에 둔다면 추가가 필요합니다.
