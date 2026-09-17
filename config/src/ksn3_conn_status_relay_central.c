@@ -52,6 +52,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
+#include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -216,6 +217,35 @@ static void find_conn_cb(struct bt_conn *conn, void *data) {
     }
 }
 
+/* Whether `a` and `b` represent the same underlying BLE link, by remote
+ * address rather than raw pointer identity. Zephyr's connection pool is a
+ * small fixed array of struct bt_conn slots that gets reused - after a
+ * connection is freed (e.g. the peripheral was gone for a long time), a
+ * later unrelated connection can be handed back the exact same pointer
+ * value. A plain `found == peripheral_conn` check would then wrongly treat
+ * a brand-new link as "unchanged" and skip re-discovery, leaving
+ * char_value_handle pointing at a handle from the OLD connection - writes
+ * to it fail silently (Write Without Response has no error path back to
+ * us), so status_led gets stuck showing whatever state was last
+ * successfully relayed before the long disconnect. Comparing by address
+ * survives pointer reuse. Ported from ksn1-firmware after this exact bug
+ * was found there (long idle + profile switch on a different host left
+ * status_led stuck showing the old profile/disconnected state until a
+ * manual reset). */
+static bool same_conn(struct bt_conn *a, struct bt_conn *b) {
+    if (a == b) {
+        return true;
+    }
+    if (!a || !b) {
+        return false;
+    }
+    struct bt_conn_info info_a, info_b;
+    if (bt_conn_get_info(a, &info_a) != 0 || bt_conn_get_info(b, &info_b) != 0) {
+        return false;
+    }
+    return bt_addr_le_cmp(info_a.le.dst, info_b.le.dst) == 0;
+}
+
 static void refresh_peripheral_conn(void) {
     struct bt_conn *found = NULL;
     bt_conn_foreach(BT_CONN_TYPE_LE, find_conn_cb, &found);
@@ -228,7 +258,7 @@ static void refresh_peripheral_conn(void) {
      * connection object once it's freed elsewhere. This was causing
      * random disconnects. */
 
-    if (found == peripheral_conn) {
+    if (same_conn(found, peripheral_conn)) {
         if (found) {
             bt_conn_unref(found); /* drop the extra ref bt_conn_foreach gave us */
         }
