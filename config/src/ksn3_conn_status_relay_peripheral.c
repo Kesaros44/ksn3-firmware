@@ -215,6 +215,7 @@ static ssize_t on_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, c
     ever_heard_from_central = true;
 
     const uint8_t *bytes = buf;
+    LOG_INF("ksn3_conn_status: DIAG received connected=%d profile=%d", bytes[0], bytes[1]); /* TEMP DIAGNOSTIC - remove after debugging */
     apply_state(bytes[0] != 0, bytes[1]);
     return len;
 }
