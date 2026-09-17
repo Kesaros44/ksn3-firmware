@@ -257,8 +257,6 @@ static void send_state(bool connected, uint8_t profile) {
         return;
     }
 
-    LOG_INF("ksn3_conn_status: DIAG sending connected=%d profile=%d", connected, profile); /* TEMP DIAGNOSTIC - remove after debugging */
-
     uint8_t val[2] = {connected ? 1 : 0, profile};
     int err = bt_gatt_write_without_response(peripheral_conn, char_value_handle, val,
                                               sizeof(val), false);
