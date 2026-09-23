@@ -30,8 +30,8 @@ If the status LED looks inverted after flashing, flip `GPIO_ACTIVE_HIGH` → `GP
 Three layers, structurally mirroring KSN-1 (see the hardware warning above — positions are schematic-verified, key assignments are a draft):
 
 - **`default_layer`** — Windows base layer with an integrated numpad on the left. Encoder = volume. Numpad corner key runs a macro (Win+R → `calc` → Enter).
-- **`func_layer`** (hold `&mo 1`) — Bluetooth profile select (0–4) and clear, output toggle, backlight inc/dec on the encoder (no-op — no backlight hardware), toggle (`&tog 2`) into `mac_layer`.
 - **`mac_layer`** — same layout with Mac modifier order and Mac media/brightness keys; numpad corner key runs Cmd+Space → Spotlight calculator instead.
+- **`func_layer`** (hold `&mo 2`; top layer, so FN always takes priority in both Windows and Mac modes) — Bluetooth profile select (0–4) and clear, output toggle, backlight inc/dec on the encoder (no-op — no backlight hardware), toggle (`&tog 1`) into `mac_layer`.
 
 ## Building
 
@@ -102,8 +102,8 @@ KSN-3 스플릿 키보드용 ZMK 펌웨어 설정입니다 — KSN-3 EasyEDA 회
 KSN-1과 구조적으로 동일한 3개 레이어(위 경고 참고 — 위치는 회로도로 검증됐고, 키 배정은 초안):
 
 - **`default_layer`** — 왼쪽에 넘버패드가 통합된 Windows 기본 레이어. 인코더 = 볼륨. 넘버패드 코너 키가 매크로(Win+R → `calc` → Enter)로 계산기 실행.
-- **`func_layer`** (홀드 `&mo 1`) — 블루투스 프로필 선택(0–4) 및 clear, 출력 토글, 인코더로 백라이트 증감(백라이트 하드웨어 자체가 없어서 실제 동작은 없음), `mac_layer`로의 토글(`&tog 2`).
 - **`mac_layer`** — 동일한 배열에 Mac 모디파이어 순서와 Mac 미디어/밝기 키; 넘버패드 코너 키는 대신 Cmd+Space → Spotlight 계산기 실행.
+- **`func_layer`** (홀드 `&mo 2`, 맨 위 레이어 — Windows/Mac 모드와 관계없이 FN을 누르면 항상 우선) — 블루투스 프로필 선택(0–4) 및 clear, 출력 토글, 인코더로 백라이트 증감(백라이트 하드웨어 자체가 없어서 실제 동작은 없음), `mac_layer`로의 토글(`&tog 1`).
 
 ## 빌드
 
